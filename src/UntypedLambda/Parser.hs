@@ -1,7 +1,6 @@
 module UntypedLambda.Parser (
     toplevel
   , parseString
-  , parseFile
 ) where
 
 import Text.Parsec
@@ -23,7 +22,8 @@ lexer = Token.makeTokenParser langDef
       }
 
 lcid = Token.identifier lexer
-lambda = Token.reserved lexer "lambda"
+lambda = Token.reserved lexer "lambda" 
+       <|> Token.symbol lexer "λ" *> pure ()
 semi = Token.semi lexer
 dot = Token.dot lexer
 
@@ -32,18 +32,13 @@ parseString str = case runParser toplevel mkContext "" str of
   Left e -> error $ show e
   Right t -> t
 
-parseFile :: String -> IO [Command]
-parseFile f = do
-  content <- readFile f
-  case runParser toplevel mkContext f content of
-    Left e -> fail $ show e
-    Right t -> return t
-
 toplevel :: Parser [Command]
 toplevel = Token.whiteSpace lexer *> endBy command semi <* eof 
 
 command :: Parser Command
-command = try parseBinding <|> Eval <$> term
+command = try parseBinding 
+        <|> Eval <$> term
+        <?> "command"
   where 
     parseBinding = 
       do id <- lcid 
@@ -55,15 +50,16 @@ binder :: Parser Binding
 binder = (pure NameBind <* Token.symbol lexer "/") 
 
 term :: Parser Term
-term = appTerm
-     <|> do lambda
-            id <- lcid <|> Token.symbol lexer "_"
-            dot
-            ctx <- getState
-            putState $ addName ctx id 
-            t <- term
-            putState ctx
-            return $ TmAbs id t
+term = do lambda
+          id <- lcid <|> Token.symbol lexer "_"
+          dot
+          ctx <- getState
+          putState $ addName ctx id 
+          t <- term
+          putState ctx
+          return $ TmAbs id t
+     <|> appTerm
+     <?> "term"            
 
 appTerm :: Parser Term
 appTerm = chainl1 aterm (return TmApp)
@@ -73,3 +69,5 @@ aterm = Token.parens lexer term
       <|> do id <- lcid 
              ctx <- getState 
              return $ TmVar (name2index ctx id) (contextLength ctx)
+
+      <?> "aterm"
